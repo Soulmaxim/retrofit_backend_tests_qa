@@ -9,7 +9,8 @@ import org.junit.jupiter.api.Test;
 import retrofit2.Response;
 import retrofit2.Retrofit;
 import ru.slmax.db.dao.CategoriesMapper;
-import ru.slmax.dto.Category;
+import ru.slmax.db.model.Categories;
+import ru.slmax.db.model.Products;
 import ru.slmax.dto.Product;
 import ru.slmax.enums.CategoryType;
 import ru.slmax.service.CategoryService;
@@ -20,14 +21,14 @@ import ru.slmax.utils.RetrofitUtils;
 import ru.slmax.db.dao.ProductsMapper;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
 
 public class ProductTests {
-    int id;
+    Integer id;
     static ProductsMapper productsMapper;
     static CategoriesMapper categoriesMapper;
     static Retrofit client;
@@ -65,40 +66,62 @@ public class ProductTests {
         assertThat(response.body().getPrice(), equalTo(product.getPrice()));
         assertThat(response.body().getCategoryTitle(), equalTo(product.getCategoryTitle()));
         prettyLogger.log(response.body().toString());
-        id = response.body().getId();
     }
 
     @Test
     void createProductWithIdTest() throws IOException {
         product.setId(13239);
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
         Response<Product> response = productService.createProduct(product).execute();
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
         assertThat(response.code(), equalTo(400));
+        assertThat(countProductsAfter, equalTo(countProductsBefore));
     }
 
     @Test
     void createProductWithNullFieldTest() throws IOException {
         product.setPrice(null);
         product.setTitle(null);
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
         Response<Product> response = productService.createProduct(product).execute();
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
         assertThat(response.code(), equalTo(400));
+        assertThat(countProductsAfter, equalTo(countProductsBefore));
     }
 
     @Test
-    void createProductWithOtherCategoryTest() throws IOException {
-        product.setCategoryTitle("Other");
+    void createProductWithNonexistentCategoryTest() throws IOException {
+        List<Categories> allCategories = DbUtils.selectAllCategory(categoriesMapper);
+        String newTitle = allCategories.get(0).getTitle() + "o";
+        boolean check = true;
+        while(check) {
+            check = false;
+            for (Categories i : allCategories) { // проверка, что категории не существует
+                if (newTitle.equals(i.getTitle())) {
+                    check = true;
+                    newTitle += "o";
+                    break;
+                }
+            }
+        }
+        product.setCategoryTitle(newTitle);
+
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
         Response<Product> response = productService.createProduct(product).execute();
-        assertThat(response.code(), equalTo(201));
-        if (response.code() == 201) prettyLogger.log(response.body().toString());
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
+        assertThat(response.code(), equalTo(400));
+        assertThat(countProductsAfter, equalTo(countProductsBefore));
     }
 
     @Test
     void getProductsByIdTest() throws IOException {
         Response<Product> response = productService.createProduct(product).execute();
+        assert response.body() != null;
         id = response.body().getId();
         response = productService
                 .getProduct(id)
                 .execute();
-        prettyLogger.log(response.body().toString());
+        if (response.body() != null) prettyLogger.log(response.body().toString());
         assertThat(response.code(), equalTo(200));
         assertThat(response.body().getId(), equalTo(id));
         assertThat(response.body().getTitle(), equalTo(product.getTitle()));
@@ -109,18 +132,33 @@ public class ProductTests {
     @Test
     void getAfterDeleteProductTest() throws IOException {
         Response<Product> response = productService.createProduct(product).execute();
+        assert response.body() != null;
         id = response.body().getId();
-        Response<ResponseBody> responseDel = productService
-                .deleteProduct(id)
-                .execute();
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
+        DbUtils.deleteProductById(productsMapper, id);
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
         response = productService
                 .getProduct(id)
                 .execute();
         assertThat(response.code(), equalTo(404));
+        assertThat(countProductsAfter, equalTo(countProductsBefore - 1));
     }
 
     @Test
-    void getADeleteProductTest() throws IOException {
+    void getProductByNonexistentIdTest() throws IOException {
+        List<Products> allProducts = DbUtils.selectAllProducts(productsMapper);
+        boolean check = true;
+        int nonId;
+        while(check) {
+            check = false;
+            nonId = (int)((Math.random() * 90000) + 10000);
+            for (Products i : allProducts) { // проверка, что такого id не существует
+                if (i.getId().equals(Long.valueOf(nonId))) {
+                    check = true;
+                    break;
+                }
+            }
+        }
         Response<Product> response = productService
                 .getProduct(-1)
                 .execute();
@@ -128,17 +166,13 @@ public class ProductTests {
     }
 
     @Test
-    void getAllProductsTest() throws IOException {
-        Response<ArrayList<Product>> response = productService
-                .getProducts()
-                .execute();
-        prettyLogger.log(response.body().toString());
-        for (int i = 0; i < response.body().size(); i++) {
-            assertThat(response.code(), equalTo(200));
-            assertThat(response.body().get(i).getId().toString(), Matchers.matchesPattern("^[0-9]{1,5}"));
-            assertThat(response.body().get(i).getTitle(), Matchers.is(notNullValue()));
-            assertThat(response.body().get(i).getPrice(), Matchers.is(notNullValue()));
-            assertThat(response.body().get(i).getCategoryTitle(), Matchers.is(notNullValue()));
+    void getAllProductsTest() {
+        List<Products> allProducts = DbUtils.selectAllProducts(productsMapper);
+        for (Products i : allProducts) {
+            assertThat(i.getId().toString(), Matchers.matchesPattern("^[0-9]{1,5}"));
+            assertThat(i.getTitle(), Matchers.is(notNullValue()));
+            assertThat(i.getPrice(), Matchers.is(notNullValue()));
+            assertThat(i.getCategory_id(), Matchers.is(notNullValue()));
         }
     }
 
@@ -147,22 +181,26 @@ public class ProductTests {
         Response<Product> response = productService
                 .createProduct(product)
                 .execute();
+        assert response.body() != null;
         id = response.body().getId();
+        Products productDB = new Products();
         Integer price = 1500;
         String title = "New title";
-        String category = "Furniture";
-        product.setId(id);
-        product.setPrice(price);
-        product.setTitle(title);
-        product.setCategoryTitle(category);
+        productDB.setId(Long.valueOf(id));
+        productDB.setPrice(price);
+        productDB.setTitle(title);
+        productDB.setCategory_id(Long.valueOf(CategoryType.FURNITURE.getId()));
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
+        DbUtils.updateProductById(productsMapper, productDB);
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
         Response<Product> responseUpd = productService
-                .updateProduct(product)
+                .getProduct(id)
                 .execute();
-        prettyLogger.log(responseUpd.body().toString());
         assertThat(responseUpd.code(), equalTo(200));
+        assertThat(countProductsAfter, equalTo(countProductsBefore));
         assertThat(responseUpd.body().getPrice(), equalTo(price));
         assertThat(responseUpd.body().getTitle(), equalTo(title));
-        assertThat(responseUpd.body().getCategoryTitle(), equalTo(category));
+        assertThat(responseUpd.body().getCategoryTitle(), equalTo(CategoryType.FURNITURE.getTitle()));
     }
 
     @Test
@@ -170,6 +208,7 @@ public class ProductTests {
         Response<Product> response = productService
                 .createProduct(product)
                 .execute();
+        assert response.body() != null;
         id = response.body().getId();
         Integer price = 1500;
         String title = "New title";
@@ -180,7 +219,10 @@ public class ProductTests {
         Response<Product> responseUpd = productService
                 .updateProduct(product)
                 .execute();
+        Products productDB = DbUtils.selectProductById(productsMapper, Long.valueOf(id));
         assertThat(responseUpd.code(), equalTo(400));
+        assertThat(productDB.getPrice(), equalTo(response.body().getPrice()));
+        assertThat(productDB.getTitle(), equalTo(response.body().getTitle()));
     }
 
     @Test
@@ -188,6 +230,7 @@ public class ProductTests {
         Response<Product> response = productService
                 .createProduct(product)
                 .execute();
+        assert response.body() != null;
         id = response.body().getId();
         Integer price = null;
         String title = null;
@@ -197,8 +240,11 @@ public class ProductTests {
         Response<Product> responseUpd = productService
                 .updateProduct(product)
                 .execute();
-        prettyLogger.log(responseUpd.body().toString());
+        if (responseUpd.body() != null) prettyLogger.log(responseUpd.body().toString());
+        Products productDB = DbUtils.selectProductById(productsMapper, Long.valueOf(id));
         assertThat(responseUpd.code(), equalTo(400));
+        assertThat(productDB.getPrice(), equalTo(response.body().getPrice()));
+        assertThat(productDB.getTitle(), equalTo(response.body().getTitle()));
     }
 
     @Test
@@ -206,10 +252,9 @@ public class ProductTests {
         Response<Product> response = productService
                 .createProduct(product)
                 .execute();
+        assert response.body() != null;
         id = response.body().getId();
-        Response<ResponseBody> responseDel = productService
-                .deleteProduct(id)
-                .execute();
+        DbUtils.deleteProductById(productsMapper, id);
         Integer price = 1500;
         String title = "New title";
         String category = "Furniture";
@@ -221,56 +266,44 @@ public class ProductTests {
         Response<Product> responseUpd = productService
                 .updateProduct(product)
                 .execute();
+        Products productDB = DbUtils.selectProductById(productsMapper, Long.valueOf(id));
         assertThat(responseUpd.code(), equalTo(404));
+        assertThat(productDB, equalTo(null));
     }
 
     @Test
     void deleteProductTest() throws IOException {
         Response<Product> response = productService.createProduct(product).execute();
+        assert response.body() != null;
         id = response.body().getId();
-        Response<ResponseBody> responseDel = productService
-                .deleteProduct(id)
-                .execute();
-        assertThat(responseDel.code(), equalTo(200));
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
+        DbUtils.deleteProductById(productsMapper, id);
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
+        assertThat(countProductsAfter, equalTo(countProductsBefore - 1));
     }
 
     @Test
     void deleteAfterDeleteProductTest() throws IOException {
         Response<Product> response = productService.createProduct(product).execute();
+        assert response.body() != null;
         id = response.body().getId();
+        Integer countProductsBefore = DbUtils.countProducts(productsMapper);
+        DbUtils.deleteProductById(productsMapper, id);
+        Integer countProductsAfter = DbUtils.countProducts(productsMapper);
         Response<ResponseBody> responseDel = productService
                 .deleteProduct(id)
                 .execute();
-        responseDel = productService
-                .deleteProduct(id)
-                .execute();
+        Integer countProductsLast = DbUtils.countProducts(productsMapper);
         assertThat(responseDel.code(), equalTo(404));
+        assertThat(countProductsBefore, equalTo(countProductsAfter+1));
+        assertThat(countProductsAfter, equalTo(countProductsLast));
     }
 
     @Test
-    void getCategoryByIdTest() throws IOException {
-        DbUtils.createNewCategory(categoriesMapper);
-        // удаление через бд
-        // создать, обновить через бд, получить
-        // создавать лучше через api
-
-        // встроить проверки через бд
-        /*
-        countCategories
-        countProducts
-        createNewCategory
-
-        deleteByPrimaryKey
-        deleteByExample
-        selectByExample
-         */
-        // сделать апдейты и удаления через бд
+    void getCategoryByIdTest() {
         Integer idCategory = CategoryType.FOOD.getId();
-        Response<Category> response = categoryService
-                .getCategory(idCategory)
-                .execute();
-        prettyLogger.log(response.body().toString());
-        assertThat(response.body().getTitle(), equalTo(CategoryType.FOOD.getTitle()));
-        assertThat(response.body().getId(), equalTo(idCategory));
+        Categories categories = DbUtils.selectCategoryById(categoriesMapper, idCategory);
+        assertThat(categories.getTitle(), equalTo(CategoryType.FOOD.getTitle()));
+        assertThat(categories.getId(), equalTo(idCategory));
     }
 }
