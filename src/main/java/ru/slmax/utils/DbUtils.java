@@ -36,7 +36,7 @@ public class DbUtils {
         return getSqlSession().getMapper(ProductsMapper.class);
     }
 
-    private static void createNewCategory(CategoriesMapper categoriesMapper) {
+    public static void createNewCategory(CategoriesMapper categoriesMapper) {
         Categories newCategory = new Categories();
         newCategory.setTitle(faker.animal().name());
         categoriesMapper.insert(newCategory);
